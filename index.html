@@ -15,11 +15,23 @@
     #output {
       font-size: 1.2em;
       white-space: pre-wrap;
+      margin-top: 1em;
+      border: 1px solid #00ffcc;
+      border-radius: 8px;
+      padding: 0.5em;
+      min-height: 4em;
     }
     button {
       margin-top: 1em;
       padding: 0.5em 1em;
       font-size: 1em;
+      background-color: #00ffcc;
+      color: black;
+      border: none;
+      border-radius: 5px;
+    }
+    button:hover {
+      opacity: 0.8;
     }
   </style>
 </head>
@@ -33,29 +45,63 @@
     const output = document.getElementById('output');
 
     btn.onclick = async () => {
-      output.textContent = "Listening...";
-      try {
+      output.textContent = "Connecting to OpenAI...";
+      
+      // Get stored key or ask for one
+      let apiKey = localStorage.getItem("openaiKey");
+      if (!apiKey) {
+        apiKey = prompt("Enter your OpenAI API key:");
+        localStorage.setItem("openaiKey", apiKey);
+      }
+
+      // Connect to OpenAI Realtime API
+      const ws = new WebSocket("wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview", [
+        "realtime",
+        "openai-insecure-api-key." + apiKey,
+        "openai-beta.realtime-input-audio"
+      ]);
+
+      ws.onopen = async () => {
+        output.textContent = "🎤 Connected. Start speaking...";
+
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { noiseSuppression: true, echoCancellation: false }
         });
 
-        // For now, just visualize mic levels so we know it works:
         const ctx = new AudioContext();
         const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        source.connect(analyser);
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
+        source.connect(processor);
+        processor.connect(ctx.destination);
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        function update() {
-          analyser.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((a,b)=>a+b)/dataArray.length;
-          output.textContent = "Mic level: " + avg.toFixed(0);
-          requestAnimationFrame(update);
-        }
-        update();
-      } catch(err) {
-        output.textContent = "Mic access failed: " + err.message;
-      }
+        // Convert Float32 to Int16 for sending
+        const float32ToInt16 = f32 => {
+          const buf = new Int16Array(f32.length);
+          for (let i = 0; i < f32.length; i++) buf[i] = Math.max(-1, Math.min(1, f32[i])) * 0x7fff;
+          return buf;
+        };
+
+        processor.onaudioprocess = (event) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          const input = event.inputBuffer.getChannelData(0);
+          ws.send(float32ToInt16(input));
+        };
+
+        ws.onmessage = (msg) => {
+          try {
+            const data = JSON.parse(msg.data);
+            if (data.type === "transcript.delta" && data.delta) {
+              output.textContent = data.delta;
+            }
+          } catch (err) {
+            console.error("Message parse error:", err);
+          }
+        };
+      };
+
+      ws.onerror = (err) => {
+        output.textContent = "WebSocket error: " + err.message;
+      };
     };
   </script>
 </body>
