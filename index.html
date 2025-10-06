@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Subtitle Badge</title>
+  <style>
+    body {
+      background-color: black;
+      color: #00ffcc;
+      font-family: monospace;
+      text-align: center;
+      padding: 1em;
+    }
+    #output {
+      font-size: 1.2em;
+      white-space: pre-wrap;
+    }
+    button {
+      margin-top: 1em;
+      padding: 0.5em 1em;
+      font-size: 1em;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎤 Live Subtitle Badge</h2>
+  <div id="output">Press Start and speak...</div>
+  <button id="startBtn">Start</button>
+
+  <script>
+    const btn = document.getElementById('startBtn');
+    const output = document.getElementById('output');
+
+    btn.onclick = async () => {
+      output.textContent = "Listening...";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { noiseSuppression: true, echoCancellation: false }
+        });
+
+        // For now, just visualize mic levels so we know it works:
+        const ctx = new AudioContext();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        function update() {
+          analyser.getByteFrequencyData(dataArray);
+          const avg = dataArray.reduce((a,b)=>a+b)/dataArray.length;
+          output.textContent = "Mic level: " + avg.toFixed(0);
+          requestAnimationFrame(update);
+        }
+        update();
+      } catch(err) {
+        output.textContent = "Mic access failed: " + err.message;
+      }
+    };
+  </script>
+</body>
+</html>
